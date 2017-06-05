@@ -19,6 +19,7 @@
 var express = require('express'); // app server
 var bodyParser = require('body-parser'); // parser for post requests
 var Conversation = require('watson-developer-cloud/conversation/v1'); // watson sdk
+var Cloudant = require('cloudant'); // cloudant sdk
 
 var app = express();
 
@@ -36,7 +37,19 @@ var conversation = new Conversation({
   version_date: Conversation.VERSION_DATE_2017_04_21
 });
 
-// Endpoint to be call from the client side
+// Initialize  cloudant db
+var db = null;
+Cloudant({account: '<username>', password: '<password>'}, function(err, cloudant) {
+  if (err) {
+    return console.log('Failed to initialize Cloudant: ' + err.message);
+  }
+
+  db = cloudant.db.use("<dbname>");
+});
+// if using bluemix instance:
+// Cloudant({instanceName: '<name of instance>', vcapServices: JSON.parse(process.env.VCAP_SERVICES)});
+
+// Endpoint to be called from the client side
 app.post('/api/message', function(req, res) {
   var workspace = process.env.WORKSPACE_ID || '<workspace-id>';
   if (!workspace || workspace === '<workspace-id>') {
@@ -46,6 +59,15 @@ app.post('/api/message', function(req, res) {
       }
     });
   }
+
+  // Setting context: just an object passed with each message to conversation
+  // Make sure your UI is saving the context and passing it with each call to the backend
+  // make external call to LDAP/Calendar API
+  // parse info out of returned data
+  var context = req.body.context;
+  context.name = "<data retrieved from external call>";
+  context.date = "<more data returned from call>";
+
   var payload = {
     workspace_id: workspace,
     context: req.body.context || {},
@@ -57,7 +79,10 @@ app.post('/api/message', function(req, res) {
     if (err) {
       return res.status(err.code || 500).json(err);
     }
-    return res.json(updateMessage(payload, data));
+    var response = updateMessage(payload, data);
+    // insert the response object into your specified cloudant database
+    db.insert(response);
+    return res.json(response);
   });
 });
 
